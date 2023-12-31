@@ -14,9 +14,13 @@ class Api {
       throw error.response.data.msg;
     }
   };
-  gerarCobranca = async () => {
+  gerarCobranca = async (protocolo, valorPix) => {
     try {
-      const { data } = await this.api.put("/v1/gerar-pix/");
+      const { data } = await this.api.put(
+        "/v1/gerar-pix/",
+        protocolo,
+        valorPix
+      );
       return data;
     } catch (error) {
       throw error.response.data.msg;

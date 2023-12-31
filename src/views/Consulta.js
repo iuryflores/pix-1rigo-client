@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import logo1RIGO2 from "../imgs/logo.png";
 import { Footer } from "../components/Footer";
 import { Navbar } from "../components/Navbar";
@@ -7,12 +7,7 @@ import QRCode from "qrcode.react";
 import api from "../utils/api.utils";
 import FormConsulta from "../components/FormConsulta";
 
-const Consulta = ({
-  calculateExpirationDate,
-  formatCPF,
-  formatCurrency,
-  checkPixStatus,
-}) => {
+const Consulta = ({ calculateExpirationDate, formatCPF, formatCurrency }) => {
   const [show, setShow] = useState(true);
   const [dataAPI, setDataAPI] = useState();
   const [fullPIX, setFullPIX] = useState("");
@@ -35,6 +30,28 @@ const Consulta = ({
       setSelectedBrcode(brcode);
     }
   };
+  const checkPixStatus = (pixData) => {
+    const currentDate = new Date();
+    if (pixData && pixData.cobs) {
+      const updatedPixList = pixData.cobs.map((pix) => {
+        const expirationDate = calculateExpirationDate(
+          pix.calendario.criacao,
+          pix.calendario.expiracao
+        );
+
+        if (currentDate > expirationDate) {
+          // PIX vencido
+          return { ...pix, vencido: "Vencido" };
+        } else {
+          // PIX não vencido
+          return { ...pix, vencido: "Ativo" };
+        }
+      });
+      setPixData((prevPixData) => ({ ...prevPixData, cobs: updatedPixList }));
+    }
+  };
+  console.log("dataAPI: ", dataAPI);
+  console.log("PixData: ", pixData);
 
   const [temPix, setTemPix] = useState(false);
 
@@ -102,16 +119,24 @@ const Consulta = ({
       setDataAPI("Error");
     }
   };
-
+  const valorPix = dataAPI.saldo * -1;
   const gerarPix = async () => {
     try {
-      await api.gerarCobranca();
+      await api.gerarCobranca({ protocolo, valorPix });
       setTemPix(true);
+      fetchPixList();
     } catch (error) {
       console.log(error);
     }
   };
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchPixList();
+      console.log("Checking!");
+    }, 6000); // 60000 milissegundos = 1 minuto
 
+    return () => clearInterval(intervalId);
+  }, []);
   return (
     <>
       {show && (
@@ -211,7 +236,9 @@ const Consulta = ({
                           <strong className="upper">
                             Valor total do protocolo:{" "}
                           </strong>
-                          <span className="cap">R$ {dataAPI.total}</span>
+                          <span className="cap">
+                            {formatCurrency(dataAPI.total)}
+                          </span>
                         </div>
                         {dataAPI.saldo <= 0 ? (
                           <div className="d-flex flex-column align-items-center">
@@ -220,7 +247,7 @@ const Consulta = ({
                                 Valor a ser pago via PIX:{" "}
                               </strong>
                               <span className="cap">
-                                R$ {dataAPI.saldo * -1}
+                                {formatCurrency(dataAPI.saldo * -1)}
                               </span>
                             </p>
                             <button
@@ -229,13 +256,15 @@ const Consulta = ({
                             >
                               Gerar PIX
                             </button>
+                            <hr
+                              style={{ border: "1 solid black", width: "100%" }}
+                            />
                             <table className="table">
                               <thead>
                                 <tr>
                                   <th>Criaçao</th>
                                   <th>Vencimento</th>
-                                  <th>Devedor</th>
-                                  <th>CPF/CNPJ</th>
+                                  <th>Protocolo</th>
                                   <th>Valor</th>
                                   <th>Status</th>
                                   <th></th>
@@ -243,59 +272,84 @@ const Consulta = ({
                               </thead>
                               <tbody>
                                 {pixData.cobs &&
-                                  pixData.cobs.map((pix, index) => {
-                                    return (
-                                      <tr
-                                        key={index}
-                                        style={{ verticalAlign: "middle" }}
-                                      >
-                                        <td>
-                                          {new Date(
-                                            pix.calendario.criacao
-                                          ).toLocaleDateString("pt-br", {
-                                            day: "numeric",
-                                            month: "numeric",
-                                            year: "numeric",
-                                            hour: "numeric",
-                                            minute: "numeric",
-                                          })}
-                                          h
-                                        </td>
-                                        <td>
-                                          {calculateExpirationDate(
-                                            pix.calendario.criacao,
-                                            pix.calendario.expiracao
-                                          ).toLocaleString("pt-br", {
-                                            day: "numeric",
-                                            month: "numeric",
-                                            year: "numeric",
-                                            hour: "numeric",
-                                            minute: "numeric",
-                                          })}
-                                          h
-                                        </td>
-                                        <td>{pix.devedor.nome}</td>
-                                        <td>{formatCPF(pix.devedor.cpf)}</td>
-                                        <td>
-                                          {formatCurrency(pix.valor.original)}
-                                        </td>
-                                        <td>{pix.vencido}</td>
-                                        <td>
-                                          {pix.vencido !== "Vencido" && (
-                                            <i
-                                              className="bi bi-qr-code btn btn-outline-success fs-5"
-                                              onClick={() => {
-                                                // Lógica para gerar QRCode com base no atributo brcode do item
-                                                generateQRCode(
-                                                  pix && pix.brcode
-                                                );
-                                              }}
-                                            ></i>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
+                                  pixData.cobs
+                                    .filter(
+                                      (pix) =>
+                                        pix.solicitacaoPagador ===
+                                        dataAPI.codigo.replace(".", "")
+                                    )
+                                    .map((pix, index) => {
+                                      return (
+                                        <tr
+                                          key={index}
+                                          style={{ verticalAlign: "middle" }}
+                                        >
+                                          <td>
+                                            {new Date(
+                                              pix.calendario.criacao
+                                            ).toLocaleDateString("pt-br", {
+                                              day: "numeric",
+                                              month: "numeric",
+                                              year: "numeric",
+                                              hour: "numeric",
+                                              minute: "numeric",
+                                            })}
+                                            h
+                                          </td>
+                                          <td>
+                                            {calculateExpirationDate(
+                                              pix.calendario.criacao,
+                                              pix.calendario.expiracao
+                                            ).toLocaleString("pt-br", {
+                                              day: "numeric",
+                                              month: "numeric",
+                                              year: "numeric",
+                                              hour: "numeric",
+                                              minute: "numeric",
+                                            })}
+                                            h
+                                          </td>
+                                          <td>{pix.solicitacaoPagador}</td>
+                                          <td>
+                                            {formatCurrency(pix.valor.original)}
+                                          </td>
+                                          <td>{pix.vencido}</td>
+                                          <td>
+                                            {pix.vencido !== "Vencido" && (
+                                              <>
+                                                <i
+                                                  className="bi bi-qr-code btn btn-outline-success fs-5"
+                                                  onClick={() => {
+                                                    // Lógica para gerar QRCode com base no atributo brcode do item
+                                                    generateQRCode(
+                                                      pix && pix.brcode
+                                                    );
+                                                  }}
+                                                ></i>
+                                                <i
+                                                  className="bi bi-clipboard btn btn-outline-info fs-5 mx-2"
+                                                  onClick={() => {
+                                                    // Lógica para gerar QRCode com base no atributo brcode do item
+                                                    handleCopy(
+                                                      pix && pix.brcode
+                                                    );
+                                                  }}
+                                                ></i>
+                                                <i
+                                                  className="bi bi-printer btn btn-outline-warning fs-5"
+                                                  onClick={() => {
+                                                    // Lógica para gerar QRCode com base no atributo brcode do item
+                                                    handlePrint(
+                                                      pix && pix.brcode
+                                                    );
+                                                  }}
+                                                ></i>
+                                              </>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
                               </tbody>
                             </table>
                             {temPix && (
@@ -309,28 +363,7 @@ const Consulta = ({
                                   )}
                                 </div>
 
-                                <>
-                                  <button
-                                    className="btn btn-outline-info"
-                                    onClick={handleCopy}
-                                  >
-                                    <i className="bi bi-clipboard"></i> Copiar
-                                    QRCode
-                                  </button>
-
-                                  {copied && <p>QRCode copiado!</p>}
-                                </>
-
-                                <div className="d-flex">
-                                  <button
-                                    type="submit"
-                                    className="btn btn-warning mt-3  mb-5"
-                                    onClick={handlePrint}
-                                  >
-                                    IMPRIMIR{" "}
-                                    <i className="fa fa-spinner fa-spin"></i>
-                                  </button>
-                                </div>
+                                {copied && <p>QRCode copiado!</p>}
                               </>
                             )}
                           </div>
